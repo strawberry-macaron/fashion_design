@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>画像生成</title>
+  <style>
+    body { margin: 0; background: #0f1020; color: #fff; font-family: sans-serif; }
+    header { padding: 15px 20px; background: #1b1630; display: flex; justify-content: space-between; align-items: center; }
+    header button { background: none; border: 1px solid #fff; color: #fff; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+
+    .main { display: flex; height: calc(100vh - 60px); }
+
+    .tools { width: 220px; background: #15152a; padding: 15px; box-sizing: border-box; }
+    .tools h3 { margin-top: 0; }
+    .tools label { font-size: 12px; opacity: 0.8; display: block; margin-top: 10px; }
+    .tools input[type="range"] { width: 100%; }
+    .tools button { margin-top: 12px; width: 100%; padding: 10px; border-radius: 999px; border: none; cursor: pointer; }
+
+    .canvas-area { flex: 1; display: flex; justify-content: center; align-items: center; background: #202040; }
+    canvas { background: #fff; border-radius: 8px; cursor: crosshair; }
+
+    .right { width: 340px; background: #15152a; padding: 15px; box-sizing: border-box; display: flex; flex-direction: column; }
+    .right h3 { margin-top: 0; }
+
+    textarea { width: 100%; min-height: 110px; border-radius: 8px; border: none; padding: 8px; resize: vertical; margin-bottom: 10px; font-size: 13px; }
+    .small { font-size: 12px; opacity: 0.7; margin-bottom: 10px; }
+
+    .right button { width: 100%; padding: 12px; border-radius: 999px; border: none; background: linear-gradient(135deg, #22c55e, #16a34a); color: #fff; font-size: 14px; cursor: pointer; margin-top: 5px; }
+    .right button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .preview { margin-top: 10px; flex: 1; overflow: auto; }
+    .preview img { width: 100%; border-radius: 8px; margin-top: 10px; background: #333; }
+
+    .status { font-size: 12px; opacity: 0.8; margin-top: 8px; line-height: 1.4; }
+    .error { color: #ffb4b4; }
+    .ok { color: #b8ffcf; }
+  </style>
+</head>
+<body>
+
+<div>Sketch Canvas ★API_CONNECTED_TEST★</div>
+  <div>Sketch Canvas</div>
+  <button onclick="location.href='index.html'">← ホームに戻る</button>
+</header>
+
+<div class="main">
+  <!-- 左：ツール -->
+  <div class="tools">
+    <h3>ツール</h3>
+
+    <label>ペン太さ</label>
+    <input type="range" id="size" min="1" max="10" value="2">
+
+    <label>色</label>
+    <input type="color" id="color" value="#000000">
+
+    <button onclick="clearCanvas()">クリア</button>
+  </div>
+
+  <!-- 中央：キャンバス -->
+  <div class="canvas-area">
+    <canvas id="canvas" width="512" height="512"></canvas>
+  </div>
+
+  <!-- 右：生成 -->
+  <div class="right">
+    <h3>イメージ指定</h3>
+
+    <textarea id="prompt" placeholder="例：gothic lolita dress, black and white, lace, corset, frills..."></textarea>
+    <div class="small">※ 英語プロンプト推奨（将来、自動翻訳も追加できます）</div>
+
+    <button id="genBtn" onclick="generate()">画像を生成</button>
+
+    <div class="status" id="status"></div>
+    <div class="preview" id="preview"></div>
+  </div>
+</div>
+
+<script>
+  // ✅ Flask(5000) の「転送URL」
+  const API_BASE = "https://curly-meme-4j69gvpgq9jgh5576-5000.app.github.dev";
+
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const genBtn = document.getElementById("genBtn");
+  const statusEl = document.getElementById("status");
+  const preview = document.getElementById("preview");
+
+  let drawing = false;
+
+  canvas.addEventListener("mousedown", () => drawing = true);
+  canvas.addEventListener("mouseup", () => { drawing = false; ctx.beginPath(); });
+  canvas.addEventListener("mouseleave", () => { drawing = false; ctx.beginPath(); });
+  canvas.addEventListener("mousemove", draw);
+
+  function draw(e) {
+    if (!drawing) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    ctx.strokeStyle = document.getElementById("color").value;
+    ctx.lineWidth = document.getElementById("size").value;
+    ctx.lineCap = "round";
+
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  }
+
+  function clearCanvas() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
+    preview.innerHTML = "";
+    statusEl.innerHTML = "";
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  async function generate() {
+    const prompt = document.getElementById("prompt").value.trim();
+    const sketchBase64 = canvas.toDataURL("image/png");
+
+    genBtn.disabled = true;
+    statusEl.innerHTML = "APIに送信中...";
+    preview.innerHTML = "";
+
+    try {
+      const res = await fetch(`${API_BASE}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, sketch: sketchBase64 })
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+      }
+
+      const data = await res.json();
+      console.log("API返答:", data);
+
+      statusEl.innerHTML =
+        `✅ 受信成功<br>` +
+        `prompt: ${escapeHtml(data.received_prompt || "")}`;
+
+      preview.innerHTML = `
+        <p>生成結果（仮API）</p>
+        <img src="${data.image_url}" alt="Generated">
+      `;
+    } catch (err) {
+      console.error(err);
+      statusEl.innerHTML = `❌ エラー: ${escapeHtml(err.message)}`;
+      preview.innerHTML = "";
+    } finally {
+      genBtn.disabled = false;
+    }
+  }
+</script>
+
+
+</body>
+</html>
